@@ -1,0 +1,379 @@
+import { knowledgeBase, type KbEntry } from "./knowledge-base";
+import { expandTokens, SYNONYMS } from "./synonyms";
+
+const STOPWORDS = new Set([
+  "a",
+  "an",
+  "the",
+  "is",
+  "are",
+  "was",
+  "were",
+  "be",
+  "been",
+  "being",
+  "do",
+  "does",
+  "did",
+  "doing",
+  "i",
+  "you",
+  "he",
+  "she",
+  "it",
+  "we",
+  "they",
+  "me",
+  "my",
+  "your",
+  "our",
+  "their",
+  "this",
+  "that",
+  "these",
+  "those",
+  "of",
+  "in",
+  "on",
+  "at",
+  "to",
+  "for",
+  "with",
+  "about",
+  "as",
+  "by",
+  "from",
+  "into",
+  "and",
+  "or",
+  "but",
+  "if",
+  "then",
+  "than",
+  "so",
+  "not",
+  "no",
+  "can",
+  "could",
+  "should",
+  "would",
+  "will",
+  "shall",
+  "may",
+  "might",
+  "must",
+  "have",
+  "has",
+  "had",
+  "get",
+  "got",
+  "use",
+  "using",
+  "please",
+  "tell",
+  "explain",
+  "what",
+  "whats",
+  "which",
+  "who",
+  "whom",
+  "when",
+  "where",
+  "why",
+  "how",
+  "there",
+  "here",
+  "some",
+  "any",
+  "all",
+  "up",
+  "out",
+  "between",
+  "difference",
+  "work",
+  "works",
+  "mean",
+  "means",
+  "python",
+  "py",
+  "question",
+  "help",
+]);
+
+// Very small suffix stemmer: enough to fold plurals and common verb forms.
+function stem(word: string): string {
+  let w = word;
+  if (w.length > 4 && w.endsWith("ing")) w = w.slice(0, -3);
+  else if (w.length > 4 && w.endsWith("ies")) w = `${w.slice(0, -3)}y`;
+  else if (w.length > 4 && w.endsWith("ers")) w = w.slice(0, -1);
+  else if (w.length > 3 && w.endsWith("es")) w = w.slice(0, -2);
+  else if (w.length > 3 && w.endsWith("s") && !w.endsWith("ss")) w = w.slice(0, -1);
+  else if (w.length > 4 && w.endsWith("ed")) w = w.slice(0, -2);
+  return w;
+}
+
+export function tokenize(text: string, keepStopwords = false): string[] {
+  const words = text
+    .toLowerCase()
+    .replace(/[^a-z0-9_+\-*/=<>.\s]/g, " ")
+    .split(/\s+/)
+    .filter(Boolean);
+  const kept = keepStopwords ? words : words.filter((t) => !STOPWORDS.has(t));
+  const out = kept.map(stem).filter((t) => t.length > 1);
+  // Questions made only of common words ("what can you do") still deserve a match.
+  if (out.length === 0 && !keepStopwords) return tokenize(text, true);
+  return out;
+}
+
+type Doc = { entry: KbEntry; tf: Map<string, number>; tokens: string[] };
+
+function entryText(entry: KbEntry): string {
+  return [
+    entry.questions.join(" "),
+    entry.questions.join(" "), // questions weighted twice
+    entry.topic,
+    (entry.keywords ?? []).join(" "),
+    (entry.keywords ?? []).join(" "),
+    entry.answer,
+  ].join(" ");
+}
+
+const docs: Doc[] = knowledgeBase.map((entry) => {
+  const tokens = tokenize(entryText(entry));
+  const tf = new Map<string, number>();
+  for (const t of tokens) tf.set(t, (tf.get(t) ?? 0) + 1);
+  return { entry, tf, tokens };
+});
+
+const df = new Map<string, number>();
+for (const doc of docs) {
+  for (const term of new Set(doc.tokens)) df.set(term, (df.get(term) ?? 0) + 1);
+}
+const N = docs.length;
+const idf = (term: string) => Math.log((N + 1) / ((df.get(term) ?? 0) + 1)) + 1;
+
+function vector(tf: Map<string, number>): Map<string, number> {
+  const v = new Map<string, number>();
+  for (const [term, count] of tf) {
+    v.set(term, (1 + Math.log(count)) * idf(term));
+  }
+  return v;
+}
+
+const docVectors = docs.map((doc) => {
+  const v = vector(doc.tf);
+  let norm = 0;
+  for (const value of v.values()) norm += value * value;
+  return { doc, v, norm: Math.sqrt(norm) || 1 };
+});
+
+function cosine(
+  query: Map<string, number>,
+  queryNorm: number,
+  target: Map<string, number>,
+  targetNorm: number,
+): number {
+  let dot = 0;
+  for (const [term, value] of query) {
+    const other = target.get(term);
+    if (other) dot += value * other;
+  }
+  return dot / (queryNorm * targetNorm);
+}
+
+/** Word-overlap ratio against the closest stored phrasing of a question. */
+function bestPhraseOverlap(queryTokens: string[], entry: KbEntry): number {
+  if (queryTokens.length === 0) return 0;
+  const qs = new Set(queryTokens);
+  let best = 0;
+  for (const q of entry.questions) {
+    const t = new Set(tokenize(q));
+    if (t.size === 0) continue;
+    let shared = 0;
+    for (const term of t) if (qs.has(term)) shared += 1;
+    best = Math.max(best, shared / Math.max(t.size, qs.size));
+  }
+  return best;
+}
+
+/** Character trigrams — gives typo tolerance ("dictionry", "funtion"). */
+function trigrams(text: string): Set<string> {
+  const s = ` ${text
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()} `;
+  const out = new Set<string>();
+  for (let i = 0; i < s.length - 2; i += 1) out.add(s.slice(i, i + 3));
+  return out;
+}
+
+const docTrigrams = docs.map((doc) =>
+  trigrams(
+    [doc.entry.questions.join(" "), doc.entry.topic, (doc.entry.keywords ?? []).join(" ")].join(
+      " ",
+    ),
+  ),
+);
+
+function trigramSimilarity(a: Set<string>, b: Set<string>): number {
+  if (a.size === 0 || b.size === 0) return 0;
+  let shared = 0;
+  for (const g of a) if (b.has(g)) shared += 1;
+  return shared / a.size;
+}
+
+/** Vocabulary of every term the knowledge base actually uses. */
+const vocabulary = [...df.keys()];
+/** Damerau-Levenshtein distance (counts transpositions like "yeild"), capped. */
+function editDistance(a: string, b: string, max: number): number {
+  if (Math.abs(a.length - b.length) > max) return max + 1;
+  const rows: number[][] = [Array.from({ length: b.length + 1 }, (_, i) => i)];
+  for (let i = 1; i <= a.length; i += 1) {
+    const row = [i];
+    let rowMin = i;
+    for (let j = 1; j <= b.length; j += 1) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      let value = Math.min(row[j - 1]! + 1, rows[i - 1]![j]! + 1, rows[i - 1]![j - 1]! + cost);
+      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) {
+        value = Math.min(value, rows[i - 2]![j - 2]! + 1);
+      }
+      row.push(value);
+      rowMin = Math.min(rowMin, value);
+    }
+    if (rowMin > max) return max + 1;
+    rows.push(row);
+  }
+  return rows[a.length]![b.length]!;
+}
+
+/** Snap a misspelled word onto the closest known term ("yeild" -> "yield"). */
+function correctToken(token: string): string {
+  if (df.has(token) || token.length < 4) return token;
+  const max = token.length <= 6 ? 1 : 2;
+  let best = token;
+  let bestScore = max + 1;
+  for (const term of vocabulary) {
+    if (term.length < 3) continue;
+    const d = editDistance(token, term, max);
+    if (d < bestScore) {
+      bestScore = d;
+      best = term;
+      if (d === 1) break;
+    }
+  }
+  return best;
+}
+
+export type MatchResult = {
+  matched: boolean;
+  confidence: number;
+  entry?: KbEntry;
+  suggestions: string[];
+};
+
+export const CONFIDENCE_THRESHOLD = 0.2;
+
+export type LearnedWeight = { entry_id: string; token: string; weight: number };
+
+const normalize = (text: string) =>
+  text
+    .toLowerCase()
+    .replace(/[^a-z0-9_]+/g, " ")
+    .trim();
+/** Every stored phrasing, so asking a listed question word-for-word always hits its entry. */
+const exactPhrases = new Map<string, KbEntry>();
+for (const doc of docs)
+  for (const q of doc.entry.questions) exactPhrases.set(normalize(q), doc.entry);
+
+export function findAnswer(question: string, weights: LearnedWeight[] = []): MatchResult {
+  const exact = exactPhrases.get(normalize(question));
+  const original = tokenize(question);
+  const rawTokens = original.map(correctToken);
+  // Share of words the knowledge base actually knows; far-fetched typo fixes count less,
+  // so off-topic questions ("weather in paris") can't ride on snapped words.
+  const coverage =
+    original.reduce((sum, t, i) => {
+      if (df.has(t) || STOPWORDS.has(t) || Object.hasOwn(SYNONYMS, t)) return sum + 1;
+      const fixed = rawTokens[i]!;
+      if (fixed === t) return sum;
+      // Short words snap to the wrong term too easily ("paris" -> "pairs"), so trust their fixes less.
+      return sum + (editDistance(t, fixed, 2) <= 1 && t.length > 5 ? 0.8 : 0.4);
+    }, 0) / Math.max(1, original.length);
+  const evidence = 0.35 + 0.65 * coverage;
+  // Understand everyday phrasing by expanding to knowledge-base vocabulary.
+  const queryTokens = expandTokens(rawTokens);
+  const qtf = new Map<string, number>();
+  for (const t of queryTokens) qtf.set(t, (qtf.get(t) ?? 0) + 1);
+  const qv = vector(qtf);
+  let qnorm = 0;
+  for (const value of qv.values()) qnorm += value * value;
+  qnorm = Math.sqrt(qnorm) || 1;
+
+  const qgrams = trigrams(question);
+
+  const scored = docVectors
+    .map(({ doc, v, norm }, i) => {
+      const sim = queryTokens.length ? cosine(qv, qnorm, v, norm) : 0;
+      const overlap = Math.max(
+        bestPhraseOverlap(rawTokens, doc.entry),
+        bestPhraseOverlap(queryTokens, doc.entry),
+      );
+      const fuzzy = trigramSimilarity(qgrams, docTrigrams[i] ?? new Set());
+      // Blend corpus similarity, direct phrasing overlap, and typo tolerance.
+      const base = 0.55 * sim + 0.3 * overlap + 0.15 * fuzzy;
+      const topicTerms = new Set(tokenize(doc.entry.topic));
+      const topic =
+        queryTokens.filter((t) => topicTerms.has(t)).length / Math.max(1, queryTokens.length);
+      const relevant = weights.filter(
+        (w) => w.entry_id === doc.entry.id && rawTokens.includes(w.token),
+      );
+      const learned =
+        relevant.reduce((sum, w) => sum + Math.max(-5, Math.min(5, w.weight)), 0) /
+        Math.max(1, new Set(rawTokens).size);
+      // Feedback cannot rescue an unrelated candidate or overwhelm retrieval evidence.
+      const adjustment =
+        base >= CONFIDENCE_THRESHOLD ? Math.max(-0.08, Math.min(0.08, learned * 0.016)) : 0;
+      const score = (base + 0.1 * topic) * evidence + adjustment;
+      return { entry: doc.entry, score };
+    })
+    .sort((a, b) => b.score - a.score);
+
+  if (exact) {
+    return {
+      matched: true,
+      confidence: 0.99,
+      entry: exact,
+      suggestions: scored
+        .filter((x) => x.entry.id !== exact.id && x.score > 0.12)
+        .slice(0, 2)
+        .map((x) => x.entry.questions[0])
+        .filter((q): q is string => Boolean(q)),
+    };
+  }
+
+  const top = scored[0];
+  const confidence = top ? Math.min(0.99, Math.round(top.score * 100) / 100) : 0;
+
+  // Mostly unrecognised words means the question isn't about Python: refuse rather than guess.
+  if (!top || confidence < CONFIDENCE_THRESHOLD || coverage < 0.5) {
+    return {
+      matched: false,
+      confidence,
+      suggestions: scored
+        .slice(0, 3)
+        .map((s) => s.entry.questions[0])
+        .filter((q): q is string => Boolean(q)),
+    };
+  }
+
+  return {
+    matched: true,
+    confidence,
+    entry: top.entry,
+    suggestions: scored
+      .slice(1, 3)
+      .filter((s) => s.score > 0.12)
+      .map((s) => s.entry.questions[0])
+      .filter((q): q is string => Boolean(q)),
+  };
+}
