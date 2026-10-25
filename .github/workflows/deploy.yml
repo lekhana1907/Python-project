@@ -1,0 +1,45 @@
+# Deploys the app to Vercel production on every push to main.
+# Needs one repository secret: VERCEL_TOKEN (Settings → Secrets and variables → Actions).
+name: Deploy to Vercel
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: vercel-production
+  cancel-in-progress: true
+
+env:
+  # IDs of the Vercel team and project (not secret; same values as .vercel/project.json).
+  VERCEL_ORG_ID: team_chp6AXhYYVr6sromgcWZyzSJ
+  VERCEL_PROJECT_ID: prj_sey9cisvuDTHKCMVL5bpLNLFXey7
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # npm install (not ci): the lockfile was created on Windows and native optional packages differ on Linux.
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Check answers (stops the deploy if the chatbot regresses)
+        run: npm run check:answers
+
+      - name: Pull Vercel settings
+        run: npx --yes vercel@65.2.0 pull --yes --environment=production --token=${{ secrets.VERCEL_TOKEN }}
+
+      - name: Build
+        run: npx --yes vercel@65.2.0 build --prod --token=${{ secrets.VERCEL_TOKEN }}
+
+      - name: Deploy to production
+        run: npx --yes vercel@65.2.0 deploy --prebuilt --prod --token=${{ secrets.VERCEL_TOKEN }}
