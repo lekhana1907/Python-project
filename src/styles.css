@@ -81,7 +81,7 @@
 
 :root {
   --radius: 0.625rem;
-  /* PyPro "highlighter" palette: ink on paper, Python yellow as the one loud colour.
+  /* Python Project "highlighter" palette: ink on paper, Python yellow as the one loud colour.
      Text contrast on --bg: fg 17:1, body 13:1, dim 5.6:1. Yellow is only ever a background under ink. */
   --bg: #fbfbf9;
   --surface: #ffffff;

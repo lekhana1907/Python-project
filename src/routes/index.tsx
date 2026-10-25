@@ -4,18 +4,18 @@ import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 
 import { CodeBlock } from "@/components/CodeBlock";
 import { LogoMark } from "@/components/Logo";
-import { answerQuestion, type Answer } from "@/lib/answer";
+import { reply, type Part } from "@/lib/chat";
 
 export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
-      { title: "PyPro — ask anything about Python" },
+      { title: "Python Project — ask anything about Python" },
       {
         name: "description",
         content:
-          "Chat with PyPro: ask any Python question in plain English and get a clear answer with example code. Free, instant, no sign-up.",
+          "Chat with Python Project: ask any Python question in plain English and get a clear answer with example code. Free, instant, no sign-up.",
       },
-      { property: "og:title", content: "PyPro — ask anything about Python" },
+      { property: "og:title", content: "Python Project — ask anything about Python" },
       {
         property: "og:description",
         content:
@@ -28,9 +28,9 @@ export const Route = createFileRoute("/")({
 
 type Message =
   | { id: string; role: "user"; text: string; time: number }
-  | { id: string; role: "bot"; time: number; answer: Answer };
+  | { id: string; role: "bot"; time: number; question: string; parts: Part[] };
 
-const STORAGE_KEY = "pypro.chat.v1";
+const STORAGE_KEY = "python-project.chat.v1";
 const STARTERS = [
   "How do I reverse a list?",
   "What is a decorator?",
@@ -99,11 +99,22 @@ function Chat() {
     setDraft("");
     requestAnimationFrame(resize);
     setTyping(true);
-    const answer = answerQuestion(question);
+    const prev = [...messages].reverse().find((m) => m.role === "bot");
+    const parts = reply(
+      question,
+      prev?.role === "bot" && prev.parts[0]
+        ? { question: prev.question, answer: prev.parts[0] }
+        : undefined,
+    );
     // A short, length-aware pause so replies feel conversational rather than abrupt.
-    const delay = 350 + Math.min(answer.answer.length, 350);
+    const delay =
+      350 +
+      Math.min(
+        parts.reduce((n, p) => n + p.answer.length, 0),
+        400,
+      );
     setTimeout(() => {
-      setMessages((m) => [...m, { id: nextId(), role: "bot", time: Date.now(), answer }]);
+      setMessages((m) => [...m, { id: nextId(), role: "bot", time: Date.now(), question, parts }]);
       setTyping(false);
     }, delay);
   }
@@ -127,8 +138,8 @@ function Chat() {
             className="flex items-center gap-3 rounded-md focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-fg"
           >
             <LogoMark className="size-9" />
-            <span translate="no" className="text-[22px] font-black tracking-[-0.03em]">
-              PyPro
+            <span translate="no" className="text-[19px] font-black tracking-[-0.03em] whitespace-nowrap sm:text-[22px]">
+              Python Project
             </span>
           </a>
           {!empty && (
@@ -139,10 +150,10 @@ function Chat() {
                 setMessages([]);
               }}
               disabled={typing}
-              className="inline-flex h-10 cursor-pointer items-center gap-2 rounded-lg px-3 text-[15px] font-semibold text-fg underline-offset-4 transition-colors duration-150 hover:bg-brand/40 focus-visible:outline-2 focus-visible:outline-fg disabled:cursor-default disabled:opacity-40"
+              className="inline-flex h-11 min-w-11 cursor-pointer items-center justify-center gap-2 rounded-lg px-3 text-[15px] font-semibold text-fg transition-colors duration-150 hover:bg-brand/40 focus-visible:outline-2 focus-visible:outline-fg disabled:cursor-default disabled:opacity-40"
             >
               <RotateCcw className="size-4" aria-hidden />
-              New chat
+              <span className="sr-only sm:not-sr-only">New chat</span>
             </button>
           )}
         </div>
@@ -207,7 +218,7 @@ function Chat() {
             {typing && (
               <li
                 className="msg-in-left grid grid-cols-[2rem_1fr] gap-3.5"
-                aria-label="PyPro is typing"
+                aria-label="Python Project is typing"
               >
                 <LogoMark className="size-8" />
                 <span className="flex h-8 items-center gap-1.5">
@@ -234,11 +245,11 @@ function Chat() {
           }}
           className="mx-auto flex max-w-3xl items-end gap-2 rounded-2xl border-[1.5px] border-fg bg-surface p-2 pl-4 transition-shadow duration-200 focus-within:shadow-[0_0_0_4px_var(--brand)]"
         >
-          <label htmlFor="pypro-input" className="sr-only">
-            Message PyPro
+          <label htmlFor="chat-input" className="sr-only">
+            Message Python Project
           </label>
           <textarea
-            id="pypro-input"
+            id="chat-input"
             ref={inputRef}
             value={draft}
             onChange={(e) => {
@@ -264,8 +275,8 @@ function Chat() {
           </button>
         </form>
         <p className="mx-auto mt-2 hidden max-w-3xl px-1 text-xs text-dim sm:block">
-          Enter sends, Shift + Enter adds a new line. Answers come from PyPro's built-in Python
-          knowledge base.
+          Enter sends, Shift + Enter adds a new line. Answers come from a built-in Python knowledge
+          base.
         </p>
       </footer>
     </div>
@@ -302,26 +313,34 @@ function BotTurn({
   showReplies: boolean;
   onPick: (q: string) => void;
 }) {
-  const { answer } = message;
+  const { parts } = message;
+  const last = parts[parts.length - 1];
   return (
     <li className="msg-in-left grid grid-cols-[2rem_1fr] gap-3.5">
       <LogoMark className="size-8" />
       <div className="min-w-0">
         <p className="flex h-8 items-center gap-2 text-[15px] font-bold">
-          PyPro
+          Python Project
           <time className="text-xs font-normal text-dim">{clock(message.time)}</time>
         </p>
-        {!answer.matched && (
-          <p className="mb-1 text-[17px] font-bold text-fg">I'm not sure about that one.</p>
-        )}
-        <Prose text={answer.answer} />
-        {answer.code && <CodeBlock code={answer.code} />}
-        {showReplies && answer.suggestions.length > 0 && (
+        <div className="space-y-6">
+          {parts.map((part, i) => (
+            <section key={i}>
+              {!part.matched && (
+                <p className="mb-1 text-[17px] font-bold text-fg">I'm not sure about that one.</p>
+              )}
+              {part.lead && <p className="mb-1.5 text-[17px] font-bold text-fg">{part.lead}</p>}
+              {part.answer && <Prose text={part.answer} />}
+              {part.code && <CodeBlock code={part.code} />}
+            </section>
+          ))}
+        </div>
+        {showReplies && last && last.suggestions.length > 0 && (
           <div className="mt-5">
             <p className="mb-2.5 text-sm font-semibold text-dim">
-              {answer.matched ? "You might also ask" : "Try one of these"}
+              {last.matched ? "You might also ask" : "Try one of these"}
             </p>
-            <Chips items={answer.suggestions} onPick={onPick} />
+            <Chips items={last.suggestions} onPick={onPick} />
           </div>
         )}
       </div>

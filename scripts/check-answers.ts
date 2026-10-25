@@ -2,6 +2,7 @@
 import assert from "node:assert/strict";
 
 import { answerQuestion } from "../src/lib/answer";
+import { reply, type Turn } from "../src/lib/chat";
 import { knowledgeBase } from "../src/lib/knowledge-base";
 
 const cases: [string, string][] = [
@@ -191,7 +192,18 @@ join a list
 what is a docstring
 how to comment
 what is indentation
-data types in python`.split("\n");
+data types in python
+can only concatenate str not int
+print on same line
+make a gui
+priority queue
+random choice from list
+run shell command
+class variable vs instance variable
+machine learning in python
+make a game
+2d list
+requirements file`.split("\n");
 const unanswered = common.filter((q) => !answerQuestion(q).matched);
 assert.deepEqual(unanswered, [], "common questions without an answer");
 
@@ -219,4 +231,30 @@ console.log(
   `${knowledgeBase.length} entries, avg ${((performance.now() - t) / 200).toFixed(2)}ms per answer`,
 );
 assert.equal(failed, 0, `${failed} routing failures`);
+
+// Conversation layer: small talk, follow-ups that use the previous turn, two questions at once.
+const turn = (q: string): Turn => ({ question: q, answer: answerQuestion(q) });
+assert.equal(reply("hi")[0]?.topic, "Chat", "greeting");
+assert.equal(reply("thanks!")[0]?.topic, "Chat", "thanks");
+const ex = reply("show me an example", turn("What is a decorator?"))[0];
+assert.ok(
+  ex?.entryId === "decorators" && ex.code,
+  "example follow-up reuses the previous entry's code",
+);
+const swap = reply("what about strings?", turn("How do I reverse a list?"))[0];
+assert.ok(
+  knowledgeBase
+    .find((e) => e.id === swap?.entryId)
+    ?.questions.includes("How do I reverse a string?"),
+  `"what about strings" after reversing a list -> ${swap?.entryId}`,
+);
+const more = reply("tell me more", turn("What is a decorator?"))[0];
+assert.ok(more?.matched && more.entryId !== "decorators", "tell me more moves to a related entry");
+const two = reply("what is a list and what is a tuple?");
+assert.deepEqual(
+  two.map((p) => p.entryId),
+  ["lists", "tuples"],
+  "two questions in one message",
+);
+assert.equal(reply("weather in paris")[0]?.matched, false, "off-topic still refused");
 console.log("ok");

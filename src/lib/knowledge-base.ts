@@ -1,6 +1,7 @@
 import { extraKnowledge } from "./knowledge-base-extra";
 import { generalKnowledge } from "./knowledge-base-general";
 import { moreKnowledge } from "./knowledge-base-more";
+import { expandedKnowledge } from "./knowledge-base-expanded";
 
 export type KbEntry = {
   id: string;
@@ -351,4 +352,5 @@ export const knowledgeBase: KbEntry[] = [
   ...extraKnowledge,
   ...generalKnowledge,
   ...moreKnowledge,
+  ...expandedKnowledge,
 ];

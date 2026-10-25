@@ -1,4 +1,4 @@
-/** PyPro mark: a highlighter-yellow tile with an ink "P" whose stem ends in a speech-bubble point. */
+/** Python Project mark: a highlighter-yellow tile with an ink "P" whose stem ends in a speech-bubble point. */
 export function LogoMark({ className = "size-9" }: { className?: string }) {
   return (
     <svg viewBox="0 0 64 64" className={className} aria-hidden="true">

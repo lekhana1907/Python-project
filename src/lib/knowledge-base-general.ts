@@ -208,9 +208,9 @@ export const generalKnowledge: KbEntry[] = [
       "know",
       "do",
       "chatbot",
-      "pypro",
+      "python project",
     ],
     answer:
-      "I'm PyPro, a Python question-answering assistant. I match your question against a built-in Python knowledge base — no external AI — and return the closest answer with its topic and match score. Ask me about syntax, data types, lists, dictionaries, loops, functions, classes, files, errors, libraries, or general programming and learning advice.",
+      "I'm the Python Project assistant, a Python question-answering bot. I match your question against a built-in Python knowledge base — no external AI — and return the closest answer with its topic and match score. Ask me about syntax, data types, lists, dictionaries, loops, functions, classes, files, errors, libraries, or general programming and learning advice.",
   },
 ];
