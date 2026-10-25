@@ -138,7 +138,10 @@ function Chat() {
             className="flex items-center gap-3 rounded-md focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-fg"
           >
             <LogoMark className="size-9" />
-            <span translate="no" className="text-[19px] font-black tracking-[-0.03em] whitespace-nowrap sm:text-[22px]">
+            <span
+              translate="no"
+              className="text-[19px] font-black tracking-[-0.03em] whitespace-nowrap sm:text-[22px]"
+            >
               Python Project
             </span>
           </a>
